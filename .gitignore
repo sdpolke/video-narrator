@@ -1,0 +1,6 @@
+/pipeline/__pycache__
+/output
+.DS_Store
+*.pt
+*.mov
+*.mp4
