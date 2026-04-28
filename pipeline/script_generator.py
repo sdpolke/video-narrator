@@ -39,9 +39,19 @@ def _build_segment_block(segments: list[dict]) -> str:
 
 
 STYLE_INSTRUCTIONS = {
-    "professional": "Use a clear, confident, professional product-demo tone.",
-    "casual": "Use a friendly, conversational tone like showing a colleague.",
-    "tutorial": "Use an instructional step-by-step tutorial tone.",
+    "professional": (
+        "Use a confident, benefit-driven SaaS product demo tone. "
+        "Focus on what the user achieves, not just what they click. "
+        "Start sentences with action verbs. Keep it punchy and outcome-focused."
+    ),
+    "casual": (
+        "Use a friendly, conversational tone like showing a colleague. "
+        "Focus on benefits and ease of use. Keep it natural and engaging."
+    ),
+    "tutorial": (
+        "Use an instructional step-by-step tutorial tone. "
+        "Focus on clarity and actionable guidance."
+    ),
 }
 
 
@@ -104,7 +114,7 @@ Return valid JSON only, no markdown fences."""
         f"Step {i+1}: {step_titles.get(i+1, 'Untitled')}" for i in range(len(segments))
     )
 
-    narration_prompt = f"""You are writing voiceover narration for a product explainer video.
+    narration_prompt = f"""You are writing voiceover narration for a SaaS product explainer video in the style of modern AI-generated product demos (like Trupeer, Loom, Descript).
 
 Video summary: {summary_text}
 
@@ -114,22 +124,53 @@ Steps:
 Detailed segment descriptions:
 {segment_block}
 
-Write the narration. Rules:
+Write the narration following this style guide:
+
+TONE & DELIVERY:
 - {tone}
-- Segment 0 is the INTRO: read the summary naturally (2 sentences max, ~20 words).
-- For each step (1 to {len(segments)}): write exactly ONE sentence, max 15 words.
-  Start with the action or purpose, NOT "the user" or "we".
-  Example good: "Select saved credentials and sign in to access the dashboard."
-  Example bad:  "The user clicks the sign-in button to log in."
-  Example bad:  "In the Data Collector Agent, the user navigates to sessions."
-- CRITICAL: Mention the product/tool name ONLY ONCE in the intro. NEVER repeat it in the steps.
-  After the intro, refer to it as "the platform", "the tool", or just describe the action directly.
-- Keep it concise. The video should feel snappy, not drawn out.
-- Flow naturally from one step to the next.
+- Confident but not salesy — focus on credibility and usability
+- High-density information delivery — every sentence introduces value
+- Benefit-driven: emphasize outcomes, not just actions
+- Use parallel phrasing: "Record your screen... Generate instantly... Edit with AI..."
+
+STRUCTURE:
+- Segment 0 (INTRO): Hook with the problem/opportunity, then introduce the solution (2 sentences, ~25 words)
+  Example: "Creating product demos takes hours of editing. [Product] turns any screen recording into a polished explainer video — automatically."
+- Each step (1 to {len(segments)}): ONE sentence, 12-18 words
+  - Start with ACTION VERBS: "Record...", "Generate...", "Customize...", "Export..."
+  - Focus on WHAT THE USER ACHIEVES, not just what they click
+  - Good: "Generate professional narration in seconds — no recording needed."
+  - Bad: "The user clicks the generate button to create audio."
+  - Good: "Customize your video with AI-powered editing tools."
+  - Bad: "In the editor, various options are available for customization."
+
+CRITICAL RULES:
+- Mention the product name ONLY in the intro. After that, use "the platform", "the tool", or just describe the action
+- NO filler words or phrases like "simply", "just", "easily" — let the speed speak for itself
+- Use em-dashes for emphasis: "Record your screen — that's it."
+- Add strategic pauses with ellipses: "Upload your footage... and watch the magic happen."
+- Keep transitions tight and modular — each line should work standalone
+- Focus on SPEED, QUALITY, SCALE as key benefits
+
+ZOOM DETECTION (NEW):
+For each segment, identify if there's a specific UI element or region that should be zoomed/highlighted.
+If the segment involves clicking a button, filling a form, selecting an option, or any focused UI interaction,
+specify the approximate screen region (as percentages from top-left):
+- "top-left" (0-33% x, 0-33% y)
+- "top-center" (33-66% x, 0-33% y)
+- "top-right" (66-100% x, 0-33% y)
+- "center-left" (0-33% x, 33-66% y)
+- "center" (33-66% x, 33-66% y)
+- "center-right" (66-100% x, 33-66% y)
+- "bottom-left" (0-33% x, 66-100% y)
+- "bottom-center" (33-66% x, 66-100% y)
+- "bottom-right" (66-100% x, 66-100% y)
+- "full" (no zoom, show entire screen)
 
 Return a JSON array:
-  [{{"segment": 0, "narration": "intro summary text"}},
-   {{"segment": 1, "narration": "step 1 text"}},
+  [{{"segment": 0, "narration": "intro hook + solution", "zoom_region": "full"}},
+   {{"segment": 1, "narration": "action-verb driven step", "zoom_region": "center"}},
+   {{"segment": 2, "narration": "another step", "zoom_region": "top-right"}},
    ...]
 
 Return valid JSON only, no markdown fences."""
@@ -142,9 +183,11 @@ Return valid JSON only, no markdown fences."""
 
     # Find the intro (segment 0)
     intro_text = summary_text
+    intro_zoom = "full"
     for item in narrations:
         if item.get("segment") == 0:
             intro_text = item["narration"]
+            intro_zoom = item.get("zoom_region", "full")
             break
 
     # Intro uses the first segment's video range
@@ -153,18 +196,22 @@ Return valid JSON only, no markdown fences."""
             "start": segments[0]["start"],
             "end": segments[0]["end"],
             "narration": intro_text,
+            "zoom_region": intro_zoom,
         })
 
     # Steps 1-N
-    narration_map = {item["segment"]: item["narration"] for item in narrations}
+    narration_map = {item["segment"]: item for item in narrations}
     for i, seg in enumerate(segments):
         step_num = i + 1
-        text = narration_map.get(step_num, "")
+        item = narration_map.get(step_num, {})
+        text = item.get("narration", "")
+        zoom_region = item.get("zoom_region", "center")
         if text:
             result.append({
                 "start": seg["start"],
                 "end": seg["end"],
                 "narration": text,
+                "zoom_region": zoom_region,
             })
 
     return result

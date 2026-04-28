@@ -56,3 +56,7 @@ python main.py recording.mp4 --fps 1.0
 | `--no-zoom` | off | Skip smart zoom enhancement |
 | `--product-name` | auto-detected | Product name to use in narration |
 | `--product-description` | none | Context about the product to help VLM identify features |
+| `--avatar` | none | Path to a portrait image for talking avatar (PiP overlay) |
+| `--avatar-position` | `bottom-right` | Avatar position: bottom-right, bottom-left, top-right, top-left |
+| `--avatar-size` | `0.2` | Avatar size as fraction of video height |
+| `--avatar-shape` | `circle` | Avatar shape: circle or rectangle |

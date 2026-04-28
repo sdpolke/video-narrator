@@ -6,6 +6,7 @@ Uses Groq APIs for vision analysis, script generation, and TTS.
 
 import argparse
 import os
+import subprocess
 import sys
 import shutil
 from dotenv import load_dotenv
@@ -14,8 +15,9 @@ from pipeline.frame_extractor import extract_frames, get_video_duration
 from pipeline.vision_analyzer import analyze_frames
 from pipeline.script_generator import generate_script
 from pipeline.tts_generator import generate_audio_segments
-from pipeline.video_enhancer import enhance_video
-from pipeline.composer import compose
+from pipeline.smart_zoom import enhance_video_with_vision
+from pipeline.composer import compose, overlay_avatar, overlay_avatar_hybrid
+from pipeline.avatar_generator import generate_avatar_video
 
 
 def check_dependencies():
@@ -24,6 +26,40 @@ def check_dependencies():
         if not shutil.which(tool):
             print(f"Error: '{tool}' not found. Install FFmpeg first.")
             sys.exit(1)
+
+
+def _build_full_narration(audio_segments: list[dict], output_path: str):
+    """Concatenate all audio segment WAVs into a single file for avatar generation.
+    Uses raw PCM reading to handle Orpheus corrupt WAV headers."""
+    import wave
+    import array
+    import struct
+
+    SAMPLE_RATE = 24000
+
+    def _read_pcm(wav_path):
+        with open(wav_path, "rb") as f:
+            content = f.read()
+        idx = content.find(b"data", 12)
+        if idx == -1:
+            return array.array("h")
+        pcm_start = idx + 8
+        return array.array("h", content[pcm_start:])
+
+    all_samples = array.array("h")
+    gap_samples = array.array("h", [0] * int(SAMPLE_RATE * 0.3))  # 0.3s gap
+
+    for i, seg in enumerate(audio_segments):
+        samples = _read_pcm(seg["audio_path"])
+        all_samples.extend(samples)
+        if i < len(audio_segments) - 1:
+            all_samples.extend(gap_samples)
+
+    with wave.open(output_path, "w") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(SAMPLE_RATE)
+        wf.writeframes(all_samples.tobytes())
 
 
 def main():
@@ -41,7 +77,7 @@ def main():
         default="professional", help="Narration style"
     )
     parser.add_argument(
-        "--voice", default="troy", help="Orpheus TTS voice name"
+        "--voice", default="diana", help="Orpheus TTS voice (female: autumn/diana/hannah, male: austin/daniel/troy)"
     )
     parser.add_argument(
         "--no-zoom", action="store_true", help="Skip smart zoom enhancement"
@@ -53,6 +89,23 @@ def main():
     parser.add_argument(
         "--product-description", default=None,
         help="Short description of what the product does (helps VLM identify features)"
+    )
+    parser.add_argument(
+        "--avatar", default=None, metavar="IMAGE",
+        help="Path to a portrait image to generate a talking avatar (PiP overlay)"
+    )
+    parser.add_argument(
+        "--avatar-position", default="bottom-right",
+        choices=["bottom-right", "bottom-left", "top-right", "top-left"],
+        help="Position of the avatar overlay (default: bottom-right)"
+    )
+    parser.add_argument(
+        "--avatar-size", type=float, default=0.2,
+        help="Avatar size as fraction of video height (default: 0.2 = 20%%)"
+    )
+    parser.add_argument(
+        "--avatar-shape", default="circle", choices=["circle", "rectangle"],
+        help="Avatar overlay shape (default: circle)"
     )
     args = parser.parse_args()
 
@@ -112,12 +165,39 @@ def main():
     if not args.no_zoom:
         print("Step 5/5: Enhancing video with smart zoom + composing final output...")
         enhanced_path = os.path.join(temp_dir, "enhanced.mp4")
-        enhance_video(input_path, enhanced_path)
+        enhance_video_with_vision(input_path, enhanced_path, segments)
         video_for_compose = enhanced_path
     else:
         print("Step 5/5: Composing final output...")
 
     compose(video_for_compose, audio_segments, output_path)
+
+    # Step 6 (optional): Generate and overlay talking avatar
+    if args.avatar:
+        print("\nStep 6: Generating talking avatar...")
+        if not os.path.exists(args.avatar):
+            print(f"  Error: Avatar image not found: {args.avatar}")
+            sys.exit(1)
+
+        # Build full narration audio for avatar (concatenate all segments)
+        full_narration = os.path.join(temp_dir, "full_narration.wav")
+        _build_full_narration(audio_segments, full_narration)
+
+        avatar_video = os.path.join(temp_dir, "avatar.mp4")
+        avatar_result, portrait = generate_avatar_video(args.avatar, full_narration, avatar_video)
+
+        # Hybrid overlay: talking video where available, static portrait for the rest
+        final_with_avatar = output_path.replace(".mp4", "_with_avatar.mp4")
+        overlay_avatar_hybrid(
+            output_path,
+            avatar_result,       # None if generation fully failed
+            portrait,
+            final_with_avatar,
+            position=args.avatar_position,
+            size_ratio=args.avatar_size,
+            shape=args.avatar_shape,
+        )
+        os.replace(final_with_avatar, output_path)
 
     # Cleanup temp files
     shutil.rmtree(temp_dir, ignore_errors=True)

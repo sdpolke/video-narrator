@@ -6,7 +6,7 @@ import struct
 from groq import Groq
 
 TTS_MODEL = "canopylabs/orpheus-v1-english"
-DEFAULT_VOICE = "troy"
+DEFAULT_VOICE = "diana"
 
 
 def _fix_wav_header(wav_path: str):
